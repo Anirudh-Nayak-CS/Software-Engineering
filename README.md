@@ -145,6 +145,4 @@ variables (in `backend/.env` or the shell):
   files; `document_loader.py` falls back to a small built-in sample set if
   the directory is empty or missing.
 
-## License
 
-Add a license of your choice here.
