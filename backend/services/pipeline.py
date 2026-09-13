@@ -1,0 +1,87 @@
+from infrastructure.config import Settings, settings
+from models.documents import GraphState, PipelineResult
+from services.document_loader import load_requirement_documents
+from services.retrieval import build_retriever, format_retrieved_documents
+
+
+class RequirementEngineeringPipeline:
+    """Run LangChain locally while delegating only model inference remotely."""
+
+    def __init__(self, app_settings: Settings = settings, llm=None):
+        self.settings = app_settings
+        documents = load_requirement_documents(app_settings.document_directory)
+        self.retriever = build_retriever(documents, app_settings)
+        self.llm = llm or __import__(
+            "models.llm", fromlist=["build_lightweight_llm"]
+        ).build_lightweight_llm(app_settings)
+        self.graph = self._build_graph()
+
+    def _build_graph(self):
+        from langgraph.graph import END, START, StateGraph
+
+        builder = StateGraph(GraphState)
+        builder.add_node("retriever", self._retrieve_node)
+        builder.add_node("prd_generator", self._prd_node)
+        builder.add_node("sdlc_selector", self._sdlc_node)
+        builder.add_edge(START, "retriever")
+        builder.add_edge("retriever", "prd_generator")
+        builder.add_edge("prd_generator", "sdlc_selector")
+        builder.add_edge("sdlc_selector", END)
+        return builder.compile()
+
+    def _retrieve_node(self, state: GraphState) -> dict:
+        documents = self.retriever.invoke(state["user_requirement"])
+        return {
+            "retrieved_context": format_retrieved_documents(documents),
+            "retrieved_documents": [
+                {
+                    "source": document.source,
+                    "page": document.page,
+                    "text": document.text,
+                }
+                for document in documents
+            ],
+        }
+
+    def _prd_node(self, state: GraphState) -> dict:
+        from prompts.requirement_generation import REQUIREMENT_GENERATION_PROMPT
+
+        system_prompt = REQUIREMENT_GENERATION_PROMPT.replace(
+            "{user_requirement}", state["user_requirement"]
+        ).replace("{context}", state["retrieved_context"])
+        specification = self.llm(
+            system_prompt,
+            "Generate the requirement specification from the supplied project requirement "
+            "and retrieved evidence.",
+            max_new_tokens=self.settings.generation_tokens,
+            do_sample=True,
+            temperature=0.3,
+            top_p=0.9,
+        )
+        return {"prd_spec": specification}
+
+    def _sdlc_node(self, state: GraphState) -> dict:
+        from agents.sdlc_agent import select_sdlc_model
+
+        return {
+            "sdlc_recommendation": select_sdlc_model(
+                state["prd_spec"], self.llm
+            )
+        }
+
+    def run(self, user_requirement: str) -> PipelineResult:
+        state = self.graph.invoke(
+            {
+                "user_requirement": user_requirement,
+                "retrieved_context": "",
+                "retrieved_documents": [],
+                "prd_spec": "",
+                "sdlc_recommendation": "",
+            }
+        )
+        return PipelineResult(
+            user_requirement=user_requirement,
+            retrieved_documents=state["retrieved_documents"],
+            requirement_specification=state["prd_spec"],
+            sdlc_recommendation=state["sdlc_recommendation"],
+        )
