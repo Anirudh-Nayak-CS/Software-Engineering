@@ -121,10 +121,10 @@ variables (in `backend/.env` or the shell):
 | Variable | Default | Purpose |
 |---|---|---|
 | `MODEL_API_URL` | — | Base URL of the remote Kaggle model API |
-| `MODEL_API_TIMEOUT` | `120` | Seconds to wait for one generation call |
+| `MODEL_API_TIMEOUT` | `1800` | Seconds to wait for one generation call |
 | `MODEL_API_RETRIES` | `2` | Retry attempts on timeout/5xx errors |
 | `MODEL_API_RETRY_DELAY` | `2.0` | Base delay (seconds) between retries |
-| `GENERATION_TOKENS` | `1500` | Default `max_new_tokens` per call |
+| `GENERATION_TOKENS` | `4800` | Default `max_new_tokens` per call |
 | `REQUIREMENT_SPEC_TOKENS` | `1000` | Token budget for the spec generation step |
 | `SDLC_TOKENS` | `800` | Token budget for the SDLC recommendation step |
 | `PIPELINE_TIMEOUT` | `600` | Overall pipeline timeout |
