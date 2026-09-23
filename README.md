@@ -28,7 +28,6 @@ backend/
     requirement_agent.py    Requirement specification agent
     sdlc_agent.py            SDLC model selection agent
   data/
-    chroma_db/                Vector store data (generated, not committed)
     healthcare_documents/     Source requirement documents
   infrastructure/
     config.py                 Settings, loads backend/.env and local paths
@@ -93,7 +92,6 @@ Keep the API key in `backend/.env` or the process environment. Do not commit it.
 ```bash
 cd frontend
 npm install
-npm install react-markdown remark-gfm
 npm run dev
 ```
 
@@ -112,11 +110,10 @@ shell's current directory; shell environment variables take precedence:
 | `GEMINI_MODEL` | `gemini-3.6-flash` | Gemini model identifier |
 | `GEMINI_THINKING_LEVEL` | `minimal` | Gemini 3.6 reasoning level |
 | `GEMINI_API_TIMEOUT` | `180` | Seconds to wait for one generation call |
-| `GEMINI_API_RETRIES` | `2` | Retry attempts on rate limits, server errors, and timeouts |
+| `GEMINI_API_RETRIES` | `2` | Maximum request attempts for transient failures |
 | `GEMINI_API_RETRY_DELAY` | `2.0` | Base delay (seconds) between retries |
 | `REQUIREMENT_SPEC_TOKENS` | `8192` | Token budget for the spec generation step |
 | `SDLC_TOKENS` | `4096` | Token budget for the SDLC recommendation step |
-| `PIPELINE_TIMEOUT` | `600` | Overall pipeline timeout |
 | `LOG_LEVEL` | `INFO` | Logging verbosity |
 
 ## Troubleshooting
