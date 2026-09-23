@@ -23,8 +23,14 @@ article h2 { margin-top: 0; color: #6de0c1; }
 .markdown-body h1, .markdown-body h2, .markdown-body h3, .markdown-body h4 {
   font-family: 'Space Grotesk', sans-serif;
   color: #6de0c1;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
   margin: 1.4em 0 .5em;
 }
+.markdown-body h1 { font-size: clamp(1.6rem, 3.2vw, 2.25rem); }
+.markdown-body h2 { font-size: clamp(1.35rem, 2.5vw, 1.75rem); }
+.markdown-body h3 { font-size: 1.25rem; }
+.markdown-body h4 { font-size: 1.1rem; }
 .markdown-body h1:first-child, .markdown-body h2:first-child, .markdown-body h3:first-child { margin-top: 0; }
 .markdown-body p { margin: 0.8em 0; }
 .markdown-body strong { color: #f6f8fa; }

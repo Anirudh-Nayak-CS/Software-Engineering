@@ -24,10 +24,18 @@ class KeywordRetriever:
             key=lambda index: scores[index],
             reverse=True,
         )
-        return [
-            self.chunks[index]
-            for index in ranked_indices[: self.retrieval_count]
-        ]
+        results = []
+        source_counts: dict[str, int] = {}
+        max_chunks_per_source = 2
+        for index in ranked_indices:
+            chunk = self.chunks[index]
+            if source_counts.get(chunk.source, 0) >= max_chunks_per_source:
+                continue
+            results.append(chunk)
+            source_counts[chunk.source] = source_counts.get(chunk.source, 0) + 1
+            if len(results) >= self.retrieval_count:
+                break
+        return results
 
 
 def build_retriever(documents: Sequence, app_settings: Settings = settings):
@@ -55,12 +63,9 @@ def build_retriever(documents: Sequence, app_settings: Settings = settings):
 
 
 def format_retrieved_documents(documents: Sequence) -> str:
-    """Format retrieved evidence with the metadata needed for source citations."""
+    """Format local evidence while keeping provenance internal to the prompt."""
     sections: list[str] = []
     for document in documents:
         source = getattr(document, "source", "Unknown source")
-        page = getattr(document, "page", "Unknown page")
-        sections.append(
-            f"[Source: {source}, Page {page}]\n{document.text}"
-        )
+        sections.append(f"[Source: {source}]\n{document.text}")
     return "\n\n---\n\n".join(sections)

@@ -5,7 +5,7 @@ from services.retrieval import build_retriever, format_retrieved_documents
 
 
 class RequirementEngineeringPipeline:
-    """Run LangChain locally while delegating only model inference remotely."""
+    """Retrieve local healthcare evidence and generate results with Gemini."""
 
     def __init__(self, app_settings: Settings = settings, llm=None):
         self.settings = app_settings
@@ -53,7 +53,7 @@ class RequirementEngineeringPipeline:
             system_prompt,
             "Generate the requirement specification from the supplied project requirement "
             "and retrieved evidence.",
-            max_new_tokens=self.settings.generation_tokens,
+            max_new_tokens=self.settings.requirement_spec_tokens,
             do_sample=True,
             temperature=0.3,
             top_p=0.9,
@@ -65,7 +65,9 @@ class RequirementEngineeringPipeline:
 
         return {
             "sdlc_recommendation": select_sdlc_model(
-                state["prd_spec"], self.llm
+                state["prd_spec"],
+                self.llm,
+                max_new_tokens=self.settings.sdlc_recommendation_tokens,
             )
         }
 

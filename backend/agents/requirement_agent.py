@@ -9,7 +9,7 @@ def generate_requirement_specification(
     llm,
     app_settings: Settings = settings,
 ) -> tuple[str, list]:
-    """Retrieve evidence and generate the notebook's grounded PRD."""
+    """Retrieve evidence and generate a source-grounded requirement spec."""
     retrieved_documents = retriever.invoke(user_requirement)
     context = format_retrieved_documents(retrieved_documents)
     system_prompt = REQUIREMENT_GENERATION_PROMPT.replace(
@@ -19,7 +19,7 @@ def generate_requirement_specification(
         system_prompt,
         "Generate the requirement specification from the supplied project requirement "
         "and evidence.",
-        max_new_tokens=4096,
+        max_new_tokens=app_settings.requirement_spec_tokens,
         do_sample=True,
         temperature=0.3,
         top_p=0.9,

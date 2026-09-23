@@ -21,7 +21,7 @@ class RequirementRequest(BaseModel):
 
 @app.get("/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "workflow": "local", "model": "remote"}
+    return {"status": "ok", "workflow": "local", "model": "gemini"}
 
 
 @app.post("/requirements")
@@ -32,7 +32,6 @@ def generate_requirements(request: RequirementRequest) -> dict:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     return {
         "user_requirement": result.user_requirement,
-        "retrieved_documents": result.retrieved_documents,
         "requirement_specification": result.requirement_specification,
         "sdlc_recommendation": result.sdlc_recommendation,
     }

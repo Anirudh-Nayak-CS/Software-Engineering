@@ -3,53 +3,51 @@ Central configuration for the Requirement Engineering Pipeline.
 
 **Why this matters:**
 - Centralized control of timeouts, tokens, and retry logic
-- Easy to adjust based on Kaggle/local constraints
+- Easy to adjust for direct Gemini API inference
 - Environment-based overrides for production vs local
 """
 
-from pathlib import Path
-from typing import Optional
 import os
+from pathlib import Path
+
 from dotenv import load_dotenv
-load_dotenv()
+
+BACKEND_DIRECTORY = Path(__file__).resolve().parents[1]
+load_dotenv(BACKEND_DIRECTORY / ".env")
+
+
+def _document_directory() -> Path:
+    configured = Path(
+        os.getenv(
+            "DOCUMENT_DIRECTORY",
+            str(BACKEND_DIRECTORY / "data" / "healthcare_documents"),
+        )
+    ).expanduser()
+    if not configured.is_absolute():
+        configured = BACKEND_DIRECTORY / configured
+    return configured.resolve()
 
 class Settings:
     """Configuration settings with sensible defaults."""
 
     # ========== DOCUMENT RETRIEVAL ==========
-    document_directory: Path = Path("./documents")
+    document_directory: Path = _document_directory()
     chunk_size: int = 1000
     chunk_overlap: int = 200
-    retrieval_count: int = 5  # Top-K documents to retrieve
+    retrieval_count: int = 8  # Top-K chunks with no more than two per source file
 
-    # ========== MODEL INFERENCE - OPTIMIZED FOR KAGGLE ==========
-  
-    
- 
-    generation_tokens: int = int(os.getenv("GENERATION_TOKENS", "1500"))
-    
-    # Total budget for requirement spec generation
-    requirement_spec_tokens: int = int(os.getenv("REQUIREMENT_SPEC_TOKENS", "1000"))
-    
-    # Total budget for SDLC recommendation
-    sdlc_recommendation_tokens: int = int(os.getenv("SDLC_TOKENS", "800"))
+    # ========== GEMINI MODEL INFERENCE ==========
+    requirement_spec_tokens: int = int(os.getenv("REQUIREMENT_SPEC_TOKENS", "8192"))
+    sdlc_recommendation_tokens: int = int(os.getenv("SDLC_TOKENS", "4096"))
 
-    # ========== REMOTE MODEL SERVICE (Kaggle) ==========
-    
-    model_api_url: str = os.getenv(
-        "MODEL_API_URL",
-        "https://60f3-8-231-221-96.ngrok-free.app" 
+    gemini_api_key: str = os.getenv("GEMINI_API_KEY", "")
+    gemini_model: str = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
+    gemini_thinking_level: str = os.getenv("GEMINI_THINKING_LEVEL", "minimal")
+    gemini_api_timeout_seconds: int = int(os.getenv("GEMINI_API_TIMEOUT", "180"))
+    gemini_api_max_retries: int = int(os.getenv("GEMINI_API_RETRIES", "2"))
+    gemini_api_retry_delay_seconds: float = float(
+        os.getenv("GEMINI_API_RETRY_DELAY", "2.0")
     )
-    
-    # Timeout for single model API request
-    # Kaggle 1800s total limit / 2 requests (spec + sdlc) = 900s max per request
-    # But we want safety margin, so:
-    # 120s = safe timeout (leaves 600s buffer for local ops)
-    model_api_timeout_seconds: int = int(os.getenv("MODEL_API_TIMEOUT", "1800"))
-    
-    # Retry configuration
-    model_api_max_retries: int = int(os.getenv("MODEL_API_RETRIES", "2"))
-    model_api_retry_delay_seconds: float = float(os.getenv("MODEL_API_RETRY_DELAY", "2.0"))
 
     # ========== PIPELINE ==========
     # Total pipeline timeout (includes retrieval + spec + sdlc)
@@ -65,10 +63,12 @@ class Settings:
     def __repr__(self) -> str:
         return (
             f"Settings(\n"
-            f"  generation_tokens={self.generation_tokens},\n"
-            f"  model_api_url={self.model_api_url},\n"
-            f"  model_api_timeout={self.model_api_timeout_seconds}s,\n"
-            f"  model_api_max_retries={self.model_api_max_retries},\n"
+            f"  document_directory={self.document_directory},\n"
+            f"  requirement_spec_tokens={self.requirement_spec_tokens},\n"
+            f"  gemini_model={self.gemini_model},\n"
+            f"  gemini_thinking_level={self.gemini_thinking_level},\n"
+            f"  gemini_api_timeout={self.gemini_api_timeout_seconds}s,\n"
+            f"  gemini_api_max_retries={self.gemini_api_max_retries},\n"
             f"  pipeline_timeout={self.pipeline_timeout_seconds}s\n"
             f")"
         )
@@ -78,24 +78,6 @@ class Settings:
 settings = Settings()
 
 
-# ============================================================================
-# ENVIRONMENT VARIABLE REFERENCE
-# ============================================================================
-"""
-Set these environment variables to override defaults:
-
-LOCAL DEVELOPMENT:
-  export GENERATION_TOKENS=1500
-  export MODEL_API_TIMEOUT=1800
-  export MODEL_API_URL=http://localhost:8001
-
-KAGGLE PRODUCTION:
-  export MODEL_API_URL=https://your-ngrok-url-here.ngrok-free.app
-  export MODEL_API_TIMEOUT=1800
-  export PIPELINE_TIMEOUT=600
-
-DEBUGGING:
-  export LOG_LEVEL=DEBUG
-  export MODEL_API_RETRIES=3
-  export MODEL_API_RETRY_DELAY=5.0
-"""
+# Environment variables: GEMINI_API_KEY (required), GEMINI_MODEL,
+# GEMINI_THINKING_LEVEL, GEMINI_API_TIMEOUT, GEMINI_API_RETRIES, GEMINI_API_RETRY_DELAY,
+# REQUIREMENT_SPEC_TOKENS, SDLC_TOKENS, DOCUMENT_DIRECTORY, and LOG_LEVEL.

@@ -1,196 +1,122 @@
-"""
-Remote Model Client with Resilience Features
-
-Features:
-- Retry logic with exponential backoff
-- Timeout handling
-- Better error messages
-- Health check before requests
-- Request/response logging
-"""
+"""Direct Gemini API client with bounded retries."""
 
 import logging
 import time
-from typing import Optional
+
+import httpx
 
 logger = logging.getLogger(__name__)
 
 
-class RemoteModelClient:
-    """LangChain-compatible callable that delegates generation to Kaggle.
-    
-    Includes:
-    - Automatic retry with exponential backoff
-    - Health check before requests
-    - Detailed error messages
-    - Request timeout handling
-    """
+class GeminiModelClient:
+    """LangChain-compatible callable that sends prompts directly to Gemini."""
 
     def __init__(self, app_settings):
         self.settings = app_settings
-        self._last_health_check = 0
-        self._health_check_interval = 30 
-
-    def _health_check(self) -> bool:
-        """Check if remote service is healthy before making request."""
-        import httpx
-        
-        now = time.time()
-        if now - self._last_health_check < self._health_check_interval:
-            return True  
-        
-        self._last_health_check = now
-        try:
-            with httpx.Client() as client:
-                response = client.get(
-                    f"{self.settings.model_api_url.rstrip('/')}/health",
-                    timeout=5
-                )
-                is_healthy = response.status_code == 200
-                status = "✅ HEALTHY" if is_healthy else f"❌ ERROR {response.status_code}"
-                logger.info(f"Remote model service: {status}")
-                return is_healthy
-        except Exception as e:
-            logger.warning(f"Health check failed: {e}")
-            return False
-
-    def __call__(
-        self,
-        system_prompt: str,
-        user_content: str,
-        **generation_options,
-    ) -> str:
-        """Generate text via remote Kaggle model with retry logic.
-        
-        Args:
-            system_prompt: System message for the model
-            user_content: User query/prompt
-            **generation_options: Model parameters (max_new_tokens, temperature, etc)
-            
-        Returns:
-            Generated text
-            
-        Raises:
-            RuntimeError: If all retries fail or service is down
-        """
-        import httpx
-
-
-        if not self._health_check():
-            logger.error(
-                f"Remote model service appears offline at {self.settings.model_api_url}"
+        if not app_settings.gemini_api_key:
+            raise RuntimeError(
+                "GEMINI_API_KEY is required. Set it in backend/.env or the environment."
             )
-         
+        self.endpoint = "https://generativelanguage.googleapis.com/v1beta/interactions"
 
-        url = f"{self.settings.model_api_url.rstrip('/')}/generate"
+    def __call__(self, system_prompt: str, user_content: str, **generation_options) -> str:
+        """Generate text using Gemini's Interactions API."""
+        options = {
+            "max_output_tokens": generation_options.get(
+                "max_output_tokens", generation_options.get("max_new_tokens", 8192)
+            ),
+            "thinking_level": generation_options.get(
+                "thinking_level", self.settings.gemini_thinking_level
+            ),
+        }
+        if "temperature" in generation_options:
+            options["temperature"] = generation_options["temperature"]
+        elif generation_options.get("do_sample") is False:
+            options["temperature"] = 0
+        if "top_p" in generation_options:
+            options["top_p"] = generation_options["top_p"]
+
         payload = {
-            "system_prompt": system_prompt,
-            "user_content": user_content,
-            "generation_options": generation_options,
+            "model": self.settings.gemini_model,
+            "input": user_content,
+            "system_instruction": system_prompt,
+            "generation_config": options,
+            "store": False,
+        }
+        headers = {
+            "x-goog-api-key": self.settings.gemini_api_key,
+            "Content-Type": "application/json",
         }
 
-       
-        for attempt in range(1, self.settings.model_api_max_retries + 1):
+        for attempt in range(1, self.settings.gemini_api_max_retries + 1):
             try:
-                logger.info(
-                    f"[Attempt {attempt}/{self.settings.model_api_max_retries}] "
-                    f"Calling {url}"
-                )
-                logger.debug(f"Payload: {payload}")
-
                 response = httpx.post(
-                    url,
+                    self.endpoint,
+                    headers=headers,
                     json=payload,
-                    timeout=self.settings.model_api_timeout_seconds,
+                    timeout=self.settings.gemini_api_timeout_seconds,
                 )
                 response.raise_for_status()
-
-                result = response.json()["text"]
-                logger.info(
-                    f"✅ Success (attempt {attempt}): "
-                    f"Generated {len(result)} characters"
-                )
-                return result
-
-            except httpx.TimeoutException as exc:
-                logger.warning(
-                    f"[Attempt {attempt}] Timeout after "
-                    f"{self.settings.model_api_timeout_seconds}s"
-                )
-                if attempt < self.settings.model_api_max_retries:
-                    wait_time = (
-                        self.settings.model_api_retry_delay_seconds * (2 ** (attempt - 1))
-                    )
-                    logger.info(f"Retrying in {wait_time:.1f}s...")
-                    time.sleep(wait_time)
-                else:
+                body = response.json()
+                status = body.get("status", "unknown")
+                if status == "incomplete":
+                    usage = body.get("usage", {})
+                    errors = body.get("errors", [])
+                    diagnostic_parts = []
+                    if usage:
+                        output_tokens = usage.get("total_output_tokens")
+                        thought_tokens = usage.get("total_thought_tokens")
+                        if output_tokens is not None:
+                            diagnostic_parts.append(f"output tokens: {output_tokens}")
+                        if thought_tokens is not None:
+                            diagnostic_parts.append(f"thought tokens: {thought_tokens}")
+                    if errors:
+                        diagnostic_parts.extend(
+                            error.get("message", str(error)) for error in errors
+                        )
+                    diagnostic = "; ".join(diagnostic_parts) or "no API diagnostic provided"
+                    logger.error("Gemini interaction incomplete: %s", diagnostic)
                     raise RuntimeError(
-                        f"Model inference timeout after {attempt} attempts. "
-                        f"Kaggle service may be overloaded or crashed. "
-                        f"Check: {self.settings.model_api_url}/health"
-                    ) from exc
+                        f"Gemini returned an incomplete response ({diagnostic}). "
+                        "Confirm the backend restarted with the updated .env settings."
+                    )
+                if status != "completed":
+                    raise RuntimeError(f"Gemini interaction did not complete (status: {status}).")
 
+                output_parts = [
+                    part
+                    for step in body.get("steps", [])
+                    if step.get("type") == "model_output"
+                    for part in step.get("content", [])
+                    if part.get("type") == "text"
+                ]
+                text = "".join(part.get("text", "") for part in output_parts).strip()
+                if not text:
+                    raise RuntimeError("Gemini interaction completed without returning text.")
+                logger.info("Gemini generated %d characters", len(text))
+                return text
             except httpx.HTTPStatusError as exc:
                 status = exc.response.status_code
-                logger.error(
-                    f"[Attempt {attempt}] HTTP {status}: {exc.response.text[:200]}"
-                )
-                
-                if status == 404:
-                    raise RuntimeError(
-                        f"Model endpoint not found at {url}. "
-                        f"Kaggle service may not be running. "
-                        f"Check the ngrok tunnel and kernel status."
-                    ) from exc
-                elif status == 502:
-                    raise RuntimeError(
-                        f"Bad Gateway at {url}. Kaggle backend is unhealthy. "
-                        f"Try restarting the Kaggle kernel."
-                    ) from exc
-                elif status >= 500:
-                    if attempt < self.settings.model_api_max_retries:
-                        wait_time = (
-                            self.settings.model_api_retry_delay_seconds * (2 ** (attempt - 1))
-                        )
-                        logger.info(
-                            f"Server error, retrying in {wait_time:.1f}s..."
-                        )
-                        time.sleep(wait_time)
-                    else:
-                        raise RuntimeError(
-                            f"Remote server error (HTTP {status}) after {attempt} attempts"
-                        ) from exc
-                else:
-                    raise RuntimeError(
-                        f"Remote model request failed: HTTP {status}\n"
-                        f"Response: {exc.response.text[:500]}"
-                    ) from exc
-
+                detail = exc.response.text[:500]
+                if status in (429, 500, 502, 503, 504) and attempt < self.settings.gemini_api_max_retries:
+                    delay = self.settings.gemini_api_retry_delay_seconds * 2 ** (attempt - 1)
+                    logger.warning("Gemini HTTP %d; retrying in %.1fs", status, delay)
+                    time.sleep(delay)
+                    continue
+                raise RuntimeError(f"Gemini API request failed (HTTP {status}): {detail}") from exc
+            except httpx.TimeoutException as exc:
+                if attempt < self.settings.gemini_api_max_retries:
+                    delay = self.settings.gemini_api_retry_delay_seconds * 2 ** (attempt - 1)
+                    logger.warning("Gemini request timed out; retrying in %.1fs", delay)
+                    time.sleep(delay)
+                    continue
+                raise RuntimeError("Gemini API request timed out after retries") from exc
             except httpx.RequestError as exc:
-                logger.error(f"[Attempt {attempt}] Request failed: {exc}")
-                if attempt < self.settings.model_api_max_retries:
-                    wait_time = (
-                        self.settings.model_api_retry_delay_seconds * (2 ** (attempt - 1))
-                    )
-                    logger.info(f"Retrying in {wait_time:.1f}s...")
-                    time.sleep(wait_time)
-                else:
-                    raise RuntimeError(
-                        f"Cannot reach model service at {self.settings.model_api_url}: {exc}"
-                    ) from exc
+                if attempt < self.settings.gemini_api_max_retries:
+                    delay = self.settings.gemini_api_retry_delay_seconds * 2 ** (attempt - 1)
+                    logger.warning("Gemini connection failed; retrying in %.1fs", delay)
+                    time.sleep(delay)
+                    continue
+                raise RuntimeError(f"Could not connect to Gemini API: {exc}") from exc
 
-            except Exception as exc:
-                logger.error(f"[Attempt {attempt}] Unexpected error: {exc}", exc_info=True)
-                if attempt < self.settings.model_api_max_retries:
-                    wait_time = (
-                        self.settings.model_api_retry_delay_seconds * (2 ** (attempt - 1))
-                    )
-                    logger.info(f"Retrying in {wait_time:.1f}s...")
-                    time.sleep(wait_time)
-                else:
-                    raise RuntimeError(
-                        f"Model inference failed after {attempt} attempts: {exc}"
-                    ) from exc
-
-        # Should never reach here
-        raise RuntimeError("Model client failed unexpectedly")
+        raise RuntimeError("Gemini model client failed unexpectedly")

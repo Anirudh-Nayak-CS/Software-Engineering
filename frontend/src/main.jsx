@@ -46,7 +46,7 @@ function App() {
       <header>
         <p className="eyebrow">Requirement Engineering</p>
         <h1>Turn a project idea into a plan.</h1>
-        <p className="subtext">Describe the system. The local workflow retrieves evidence, then asks the remote GPU model for requirements and an SDLC recommendation.</p>
+        <p className="subtext">Describe the system. The workflow retrieves local healthcare evidence, then uses Gemini to generate requirements and an SDLC recommendation.</p>
       </header>
 
       <form onSubmit={submit} className="prompt-box">
