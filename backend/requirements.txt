@@ -7,3 +7,4 @@ langgraph
 rank-bm25
 pymupdf
 python-dotenv
+reportlab>=4.2.0

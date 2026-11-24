@@ -1,10 +1,8 @@
-# --- Environment / secrets ---
 backend/.env
 .env
 *.env
 !.env.example
 
-# --- Python ---
 __pycache__/
 *.py[cod]
 *$py.class
@@ -18,7 +16,6 @@ env/
 .ruff_cache/
 *.log
 
-# --- Node / frontend ---
 frontend/node_modules/
 node_modules/
 frontend/dist/
@@ -29,22 +26,18 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
-# --- Editors / OS ---
 .vscode/
 .idea/
 .DS_Store
 Thumbs.db
 
-# --- Model / cache artifacts ---
 *.bin
 *.safetensors
 *.pt
 huggingface_cache/
 .cache/
 
-# --- Jupyter ---
 .ipynb_checkpoints/
 
-# --- Misc local data ---
 documents/*
 !documents/.gitkeep

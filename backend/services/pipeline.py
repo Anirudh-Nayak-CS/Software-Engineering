@@ -5,7 +5,7 @@ from services.retrieval import build_retriever, format_retrieved_documents
 
 
 class RequirementEngineeringPipeline:
-    """Retrieve local healthcare evidence and generate results with Gemini."""
+    """Retrieve local healthcare evidence and generate results through Kaggle Qwen."""
 
     def __init__(self, app_settings: Settings = settings, llm=None):
         self.settings = app_settings
@@ -54,6 +54,7 @@ class RequirementEngineeringPipeline:
             "Generate the requirement specification from the supplied project requirement "
             "and retrieved evidence.",
             max_new_tokens=self.settings.requirement_spec_tokens,
+            max_time=self.settings.requirement_generation_max_seconds,
             do_sample=True,
             temperature=0.3,
             top_p=0.9,
@@ -68,6 +69,7 @@ class RequirementEngineeringPipeline:
                 state["prd_spec"],
                 self.llm,
                 max_new_tokens=self.settings.sdlc_recommendation_tokens,
+                max_time=self.settings.sdlc_generation_max_seconds,
             )
         }
 

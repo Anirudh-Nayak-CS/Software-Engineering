@@ -1,93 +1,38 @@
 # Requirement Engineering Pipeline
 
-Turn a plain-language project idea into a structured requirement specification
-and an SDLC recommendation. Retrieval and orchestration run locally
-(LangGraph + BM25); text generation uses Gemini’s Interactions API directly from the backend.
+The app accepts a project description, retrieves relevant local healthcare documents, generates a requirement specification, recommends an SDLC model, and downloads a PDF containing the prompt and both results. Qwen runs in Kaggle; the local backend sends generation requests to its authenticated endpoint through ngrok.
 
-## How it works
+## Request flow
 
-```
-Frontend (React)  →  Backend (FastAPI, local)  →  Gemini API
-                          │
-                          ├── retrieval.py     BM25 retrieval over local documents
-                          ├── pipeline.py      LangGraph flow: retrieve → spec → SDLC
-                          └── services/model_client.py  Calls Gemini directly with retries
-```
+1. The React frontend sends the project description to the local FastAPI backend.
+2. The backend loads local PDF, Markdown, and text documents and ranks chunks with BM25.
+3. LangGraph runs requirement generation followed by SDLC recommendation.
+4. The backend sends both prompts to the Kaggle Qwen server using its OpenAI-compatible chat endpoint.
+5. The frontend displays both Markdown results. The PDF button sends the displayed results to the local backend, which returns a formatted PDF download.
 
-1. The **backend** (`api.py`) runs locally, retrieves relevant requirement
-   documents, and calls Gemini twice — once for the requirement specification
-   and once for the SDLC recommendation.
-2. The **frontend** (`main.jsx`) posts a project requirement to the backend and
-   renders the returned markdown.
+The local backend does not download or load the model. Kaggle downloads and runs `Qwen/Qwen3-4B-Instruct-2507`. Keep the Kaggle session and ngrok tunnel active while generating results.
 
-## Project structure
+Generation is capped at 160 seconds for the specification and 80 seconds for SDLC, with output token limits to target a response within five minutes. The Kaggle endpoint sends periodic streaming keepalives so ngrok does not close an idle generation request.
 
-```
-backend/
-  agents/
-    requirement_agent.py    Requirement specification agent
-    sdlc_agent.py            SDLC model selection agent
-  data/
-    healthcare_documents/     Source requirement documents
-  infrastructure/
-    config.py                 Settings, loads backend/.env and local paths
-  models/
-    documents.py               Document/Chunk/GraphState/PipelineResult types
-  prompts/
-    requirement_generation.py  Prompt template for the spec step
-    sdlc_selection.py           Prompt template for the SDLC step
-  services/
-    model_client.py              Gemini Interactions API client with retries
-    pipeline.py                  LangGraph orchestration
-    retrieval.py                 BM25 retriever
-    document_loader.py           Loads local requirement documents
-  tests/
-  api.py                       FastAPI app, exposes POST /requirements
-  main.py                      CLI entry point
-  requirements.txt
-  .env                         Not committed — see below
+## Run Qwen in Kaggle
 
-frontend/
-  src/
-    main.jsx
-    styles.css
-  index.html
-  package.json
-  vite.config.js
-  .gitignore                   Frontend-local ignores (dist/, node_modules/)
-```
+Upload and run the single ready-to-use [Kaggle notebook](kaggle/qwen_server_kaggle.ipynb). It writes the Qwen server file, starts inference, and opens the ngrok tunnel. The steps are also summarized in [the Kaggle server guide](kaggle/README.md).
 
-## Setup
+## Run the app locally
 
-### 1. Backend
+The backend reads `backend/.env`; the frontend reads `frontend/.env`. Copy the `.env.example` files to `.env` if needed. Add the current Kaggle ngrok endpoint plus `/v1` to `MODEL_API_BASE_URL` in `backend/.env`, and set `MODEL_API_KEY` to the same secret configured in Kaggle. Keep both real `.env` files private. Restart the backend whenever the ngrok endpoint changes.
+
+Start the backend in one terminal:
 
 ```bash
 cd backend
-python -m venv .venv && source .venv/bin/activate
+python -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
+python server.py
 ```
 
-Create `backend/.env`:
-
-```dotenv
-GEMINI_API_KEY=your_rotated_key_here
-GEMINI_MODEL=gemini-3.6-flash
-GEMINI_THINKING_LEVEL=minimal
-REQUIREMENT_SPEC_TOKENS=8192
-SDLC_TOKENS=4096
-GEMINI_API_TIMEOUT=180
-GEMINI_API_RETRIES=2
-```
-
-Run the server:
-
-```bash
-uvicorn api:app --reload --port 8000
-```
-
-Keep the API key in `backend/.env` or the process environment. Do not commit it.
-
-### 2. Frontend
+Start the frontend in a second terminal:
 
 ```bash
 cd frontend
@@ -95,37 +40,41 @@ npm install
 npm run dev
 ```
 
-Open the printed local URL (Vite default: `http://localhost:5173`).
+Open the development address printed by Vite. Enter a project description, select **Generate specification**, then select **Download PDF**.
 
-## Configuration reference
+## Environment settings
 
-All settings in `infrastructure/config.py` can be overridden via environment
-variables. The app loads `backend/.env` by its file location, regardless of the
-shell's current directory; shell environment variables take precedence:
-
-| Variable | Default | Purpose |
+| Variable | File | Purpose |
 |---|---|---|
-| `GEMINI_API_KEY` | — | Required Gemini API key |
-| `DOCUMENT_DIRECTORY` | `backend/data/healthcare_documents` | Source documents for local retrieval |
-| `GEMINI_MODEL` | `gemini-3.6-flash` | Gemini model identifier |
-| `GEMINI_THINKING_LEVEL` | `minimal` | Gemini 3.6 reasoning level |
-| `GEMINI_API_TIMEOUT` | `180` | Seconds to wait for one generation call |
-| `GEMINI_API_RETRIES` | `2` | Maximum request attempts for transient failures |
-| `GEMINI_API_RETRY_DELAY` | `2.0` | Base delay (seconds) between retries |
-| `REQUIREMENT_SPEC_TOKENS` | `8192` | Token budget for the spec generation step |
-| `SDLC_TOKENS` | `4096` | Token budget for the SDLC recommendation step |
-| `LOG_LEVEL` | `INFO` | Logging verbosity |
+| `MODEL_API_BASE_URL` | `backend/.env` | Current Kaggle ngrok endpoint with `/v1` appended |
+| `MODEL_API_KEY` | `backend/.env` and Kaggle secret | Bearer key required by the Kaggle Qwen API |
+| `MODEL_ID` | `backend/.env` | Model identifier sent to the Kaggle endpoint |
+| `MODEL_API_TIMEOUT` | `backend/.env` | Maximum wait for a generation response in seconds |
+| `DOCUMENT_DIRECTORY` | `backend/.env` | Local directory containing source documents |
+| `REQUIREMENT_SPEC_TOKENS` | `backend/.env` | Maximum new tokens for requirement generation |
+| `SDLC_TOKENS` | `backend/.env` | Maximum new tokens for SDLC recommendation |
+| `REQUIREMENT_GENERATION_MAX_SECONDS`, `SDLC_GENERATION_MAX_SECONDS` | `backend/.env` | Per-step generation time budgets |
+| `API_HOST`, `API_PORT` | `backend/.env` | Local FastAPI bind address and port |
+| `CORS_ORIGINS` | `backend/.env` | Comma-separated frontend browser origins allowed by FastAPI |
+| `VITE_API_URL` | `frontend/.env` | Local FastAPI base address used by the browser |
+| `VITE_DEV_HOST`, `VITE_DEV_PORT` | `frontend/.env` | Frontend development server bind address and port |
 
-## Troubleshooting
+## Project layout
 
-- **Gemini authentication or model errors** — check that `GEMINI_API_KEY` is valid,
-  enabled for the Gemini API, and that `GEMINI_MODEL` names an available model.
-- **Timeouts** — increase `GEMINI_API_TIMEOUT` or reduce the prompt/output size.
-- **`.env` values not taking effect** — the backend loads `.env` once at
-  startup via `python-dotenv`; changes require a restart.
-- **Retrieval finds nothing / falls back to samples** — check that
-  `backend/data/healthcare_documents/` actually contains `.pdf`/`.md`/`.txt`
-  files; `document_loader.py` falls back to a small built-in sample set if
-  the directory is empty or missing.
-
-
+```text
+backend/
+  agents/                   Requirement and SDLC generation helpers
+  data/healthcare_documents/ Local healthcare source documents
+  infrastructure/config.py  Environment and path settings
+  models/                   Pipeline data structures and model factory
+  prompts/                  Requirement and SDLC prompts
+  services/                 Loading, retrieval, remote inference, PDF, orchestration
+  api.py                    FastAPI generation and PDF endpoints
+  server.py                 Configured Uvicorn startup
+kaggle/
+  qwen_server.py            Authenticated Qwen inference API for Kaggle
+frontend/
+  src/main.jsx              Input, results, and PDF download action
+  src/styles.css            Responsive interface styles
+  vite.config.js            Vite host and port configuration
+```

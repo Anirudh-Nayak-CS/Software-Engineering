@@ -1,122 +1,97 @@
-"""Direct Gemini API client with bounded retries."""
+"""HTTP client for the Qwen server running in Kaggle."""
 
+import json
 import logging
-import time
 
 import httpx
 
 logger = logging.getLogger(__name__)
 
 
-class GeminiModelClient:
-    """LangChain-compatible callable that sends prompts directly to Gemini."""
+class QwenModelClient:
+    """Callable adapter for an OpenAI-compatible Qwen chat endpoint."""
 
     def __init__(self, app_settings):
         self.settings = app_settings
-        if not app_settings.gemini_api_key:
-            raise RuntimeError(
-                "GEMINI_API_KEY is required. Set it in backend/.env or the environment."
-            )
-        self.endpoint = "https://generativelanguage.googleapis.com/v1beta/interactions"
 
     def __call__(self, system_prompt: str, user_content: str, **generation_options) -> str:
-        """Generate text using Gemini's Interactions API."""
-        options = {
-            "max_output_tokens": generation_options.get(
-                "max_output_tokens", generation_options.get("max_new_tokens", 8192)
-            ),
-            "thinking_level": generation_options.get(
-                "thinking_level", self.settings.gemini_thinking_level
-            ),
-        }
-        if "temperature" in generation_options:
-            options["temperature"] = generation_options["temperature"]
-        elif generation_options.get("do_sample") is False:
-            options["temperature"] = 0
-        if "top_p" in generation_options:
-            options["top_p"] = generation_options["top_p"]
+        base_url = self.settings.model_api_base_url
+        if not base_url:
+            raise RuntimeError(
+                "MODEL_API_BASE_URL is required. Start the Kaggle Qwen server, "
+                "expose it with ngrok, and set the endpoint URL in backend/.env."
+            )
+
+        headers = {"Content-Type": "application/json"}
+        if self.settings.model_api_key:
+            headers["Authorization"] = f"Bearer {self.settings.model_api_key}"
 
         payload = {
-            "model": self.settings.gemini_model,
-            "input": user_content,
-            "system_instruction": system_prompt,
-            "generation_config": options,
-            "store": False,
-        }
-        headers = {
-            "x-goog-api-key": self.settings.gemini_api_key,
-            "Content-Type": "application/json",
+            "model": self.settings.model_id,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_content},
+            ],
+            "max_tokens": generation_options.get("max_new_tokens", 2048),
+            "max_time": generation_options.get("max_time", 80),
+            "temperature": generation_options.get("temperature", 0.0),
+            "top_p": generation_options.get("top_p", 1.0),
+            "stream": True,
         }
 
-        for attempt in range(1, self.settings.gemini_api_max_retries + 1):
-            try:
-                response = httpx.post(
-                    self.endpoint,
-                    headers=headers,
-                    json=payload,
-                    timeout=self.settings.gemini_api_timeout_seconds,
-                )
+        try:
+            content_parts = []
+            with httpx.stream(
+                "POST",
+                f"{base_url}/chat/completions",
+                headers=headers,
+                json=payload,
+                timeout=self.settings.model_api_timeout_seconds,
+            ) as response:
                 response.raise_for_status()
-                body = response.json()
-                status = body.get("status", "unknown")
-                if status == "incomplete":
-                    usage = body.get("usage", {})
-                    errors = body.get("errors", [])
-                    diagnostic_parts = []
-                    if usage:
-                        output_tokens = usage.get("total_output_tokens")
-                        thought_tokens = usage.get("total_thought_tokens")
-                        if output_tokens is not None:
-                            diagnostic_parts.append(f"output tokens: {output_tokens}")
-                        if thought_tokens is not None:
-                            diagnostic_parts.append(f"thought tokens: {thought_tokens}")
-                    if errors:
-                        diagnostic_parts.extend(
-                            error.get("message", str(error)) for error in errors
-                        )
-                    diagnostic = "; ".join(diagnostic_parts) or "no API diagnostic provided"
-                    logger.error("Gemini interaction incomplete: %s", diagnostic)
-                    raise RuntimeError(
-                        f"Gemini returned an incomplete response ({diagnostic}). "
-                        "Confirm the backend restarted with the updated .env settings."
-                    )
-                if status != "completed":
-                    raise RuntimeError(f"Gemini interaction did not complete (status: {status}).")
+                for line in response.iter_lines():
+                    if not line.startswith("data:"):
+                        continue
+                    data = line[5:].strip()
+                    if not data:
+                        continue
+                    if data == "[DONE]":
+                        break
+                    try:
+                        event = json.loads(data)
+                        choice = event.get("choices", [{}])[0]
+                        delta = choice.get("delta", {})
+                        message = choice.get("message", {})
+                        text = delta.get("content") or message.get("content") or ""
+                        if isinstance(text, list):
+                            text = "".join(
+                                part.get("text", "")
+                                for part in text
+                                if isinstance(part, dict)
+                            )
+                        content_parts.append(str(text))
+                    except (json.JSONDecodeError, IndexError, TypeError) as exc:
+                        raise RuntimeError(
+                            "The Kaggle Qwen endpoint returned an invalid stream event."
+                        ) from exc
+            content = "".join(content_parts)
+        except httpx.TimeoutException as exc:
+            raise RuntimeError("The Kaggle Qwen endpoint timed out.") from exc
+        except httpx.RequestError as exc:
+            raise RuntimeError(
+                "Could not reach the Kaggle Qwen endpoint. Check the configured "
+                "endpoint and active ngrok tunnel."
+            ) from exc
+        except httpx.HTTPStatusError as exc:
+            raise RuntimeError(
+                f"The Kaggle Qwen endpoint returned HTTP {exc.response.status_code}. "
+                "Check the server and model API key."
+            ) from exc
+        except (KeyError, IndexError, TypeError) as exc:
+            raise RuntimeError("The Kaggle Qwen endpoint returned an invalid response.") from exc
 
-                output_parts = [
-                    part
-                    for step in body.get("steps", [])
-                    if step.get("type") == "model_output"
-                    for part in step.get("content", [])
-                    if part.get("type") == "text"
-                ]
-                text = "".join(part.get("text", "") for part in output_parts).strip()
-                if not text:
-                    raise RuntimeError("Gemini interaction completed without returning text.")
-                logger.info("Gemini generated %d characters", len(text))
-                return text
-            except httpx.HTTPStatusError as exc:
-                status = exc.response.status_code
-                detail = exc.response.text[:500]
-                if status in (429, 500, 502, 503, 504) and attempt < self.settings.gemini_api_max_retries:
-                    delay = self.settings.gemini_api_retry_delay_seconds * 2 ** (attempt - 1)
-                    logger.warning("Gemini HTTP %d; retrying in %.1fs", status, delay)
-                    time.sleep(delay)
-                    continue
-                raise RuntimeError(f"Gemini API request failed (HTTP {status}): {detail}") from exc
-            except httpx.TimeoutException as exc:
-                if attempt < self.settings.gemini_api_max_retries:
-                    delay = self.settings.gemini_api_retry_delay_seconds * 2 ** (attempt - 1)
-                    logger.warning("Gemini request timed out; retrying in %.1fs", delay)
-                    time.sleep(delay)
-                    continue
-                raise RuntimeError("Gemini API request timed out after retries") from exc
-            except httpx.RequestError as exc:
-                if attempt < self.settings.gemini_api_max_retries:
-                    delay = self.settings.gemini_api_retry_delay_seconds * 2 ** (attempt - 1)
-                    logger.warning("Gemini connection failed; retrying in %.1fs", delay)
-                    time.sleep(delay)
-                    continue
-                raise RuntimeError(f"Could not connect to Gemini API: {exc}") from exc
-
-        raise RuntimeError("Gemini model client failed unexpectedly")
+        result = str(content).strip()
+        if not result:
+            raise RuntimeError("Qwen completed generation without returning text.")
+        logger.info("Qwen endpoint generated %d characters", len(result))
+        return result

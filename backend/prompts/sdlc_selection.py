@@ -8,6 +8,13 @@ requirement stability, regulatory criticality, security risk, complexity, uncert
 needs, formal verification needs, and delivery cadence. Do not include citations, source names,
 filenames, page numbers, or references.
 
+Begin with a prominent summary line in exactly this format:
+**Best-suited SDLC model: <one primary model or hybrid recommendation>**
+
+Name the primary recommendation on that line. For a hybrid approach, name its core lifecycle
+and complementary practices. Keep the recommendation in the sections below consistent with
+this summary.
+
 Return exactly these sections:
 1. Project Characteristics
 2. SDLC Evaluation
