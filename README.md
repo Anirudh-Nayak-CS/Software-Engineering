@@ -6,7 +6,7 @@ The app retrieves relevant passages from local healthcare documents, adds them t
 
 ## Whole workflow at a glance
 
-The diagram below shows the complete flow from the user entering an idea to viewing or downloading the results. GitHub renders this Mermaid diagram as a figure.
+The diagram below shows the complete flow from the user entering an idea to viewing or downloading the results.
 
 ```mermaid
 flowchart TD
@@ -85,7 +85,7 @@ The key relationship is: **`pipeline.py` decides what to ask and what happens ne
 - **Augmentation:** the retrieved passages are inserted into the requirements prompt in `backend/agents/requirement_agent.py` / `backend/services/pipeline.py` using the template in `backend/prompts/requirement_generation.py`.
 - **Generation:** Qwen generates the requirement specification through `model_client.py` and the Kaggle server. The SDLC recommendation is a second generation call, based on the generated specification.
 
-The current retrieval implementation is BM25 keyword retrieval, not vector similarity search. `backend/data/chroma_db/` contains a Chroma database artifact, but the active pipeline shown here builds and uses BM25 from the source-document directory.
+The current retrieval implementation is BM25 keyword retrieval, not vector similarity search.
 
 ## Main folders and files
 
