@@ -44,22 +44,16 @@ class RequirementEngineeringPipeline:
         }
 
     def _prd_node(self, state: GraphState) -> dict:
-        from prompts.requirement_generation import REQUIREMENT_GENERATION_PROMPT
+        from agents.requirement_agent import generate_requirement_specification
 
-        system_prompt = REQUIREMENT_GENERATION_PROMPT.replace(
-            "{user_requirement}", state["user_requirement"]
-        ).replace("{context}", state["retrieved_context"])
-        specification = self.llm(
-            system_prompt,
-            "Generate the requirement specification from the supplied project requirement "
-            "and retrieved evidence.",
-            max_new_tokens=self.settings.requirement_spec_tokens,
-            max_time=self.settings.requirement_generation_max_seconds,
-            do_sample=True,
-            temperature=0.3,
-            top_p=0.9,
-        )
-        return {"prd_spec": specification}
+        return {
+            "prd_spec": generate_requirement_specification(
+                state["user_requirement"],
+                state["retrieved_context"],
+                self.llm,
+                app_settings=self.settings,
+            )
+        }
 
     def _sdlc_node(self, state: GraphState) -> dict:
         from agents.sdlc_agent import select_sdlc_model
